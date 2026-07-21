@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>KVM — Groove Coach 3D</title>
+<style>
+  :root{
+    --ink:#0d0c11; --ink2:#16141c;
+    --cream:#f1ece2; --cream-dim:#f1ece299;
+    --gold:#e9bf6a; --gold-hi:#f5d896;
+    --ember:#ff6b4a;
+    --ease:cubic-bezier(0.2,0,0,1);
+    --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-t:env(safe-area-inset-top,0px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;overscroll-behavior:none;}
+  body{background:var(--ink);color:var(--cream);font-family:"Archivo","Helvetica Neue",Arial,sans-serif;
+    overflow:hidden;-webkit-font-smoothing:antialiased;}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+  ::selection{background:var(--gold);color:var(--ink);}
+
+  #stage{position:fixed;inset:0;}
+  #video{display:none;}
+  #canvas{position:absolute;inset:0;width:100%;height:100%;}
+  #stage::before,#stage::after{content:"";position:absolute;left:0;right:0;height:24%;pointer-events:none;z-index:1;}
+  #stage::before{top:0;background:linear-gradient(#0d0c11b8,transparent);}
+  #stage::after{bottom:0;background:linear-gradient(transparent,#0d0c11e0);}
+
+  #pips{position:absolute;top:calc(var(--safe-t) + 10px);left:14px;right:14px;display:flex;gap:5px;z-index:3;}
+  #pips i{flex:1;height:2px;border-radius:1px;background:#f1ece224;transition:background .12s linear,box-shadow .12s linear;}
+  #pips i.on{background:var(--gold);box-shadow:0 0 10px #e9bf6a80;}
+  #pips i.one{background:#f1ece245;}
+  #pips i.one.on{background:var(--gold-hi);box-shadow:0 0 12px #f5d896a6;}
+
+  #head{position:absolute;top:calc(var(--safe-t) + 22px);left:16px;z-index:3;display:flex;align-items:center;gap:10px;}
+  #head .logo{font-weight:900;font-size:.9rem;letter-spacing:.14em;}
+  #head .live{font-size:.52rem;letter-spacing:.22em;padding:4px 9px;border-radius:7px;
+    background:#ff6b4a;color:#fff;font-weight:700;}
+  .rec-pill{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;}
+  .rec-pill i{width:7px;height:7px;border-radius:4px;background:#fff;animation:blink 1.2s ease-in-out infinite;}
+  @keyframes blink{50%{opacity:.25;}}
+
+  #frameGuide{position:absolute;inset:12% 18% 8%;z-index:2;pointer-events:none;
+    border:1.5px dashed #f1ece24d;border-radius:28px;
+    transition:border-color .4s var(--ease), box-shadow .4s var(--ease);opacity:0;}
+  #frameGuide.show{opacity:1;}
+  #frameGuide.ok{border-color:var(--gold);border-style:solid;box-shadow:0 0 40px #e9bf6a26 inset;}
+  #frameMsg{position:absolute;left:16px;right:16px;top:50%;translate:0 -50%;z-index:3;text-align:center;
+    font-size:1rem;font-weight:700;text-shadow:0 2px 16px #000c;opacity:0;transition:opacity .3s var(--ease);
+    text-wrap:balance;pointer-events:none;}
+  #frameMsg.show{opacity:1;}
+  #frameMsg .sub{display:block;margin-top:6px;font-size:.75rem;font-weight:400;color:var(--cream-dim);}
+
+  #countdown{position:absolute;top:50%;left:50%;translate:-50% -50%;z-index:4;
+    font-size:clamp(6rem,30vw,11rem);font-weight:900;color:var(--gold-hi);
+    opacity:0;pointer-events:none;text-shadow:0 0 60px #e9bf6a4d;font-variant-numeric:tabular-nums;}
+
+  #rail{position:absolute;right:10px;bottom:calc(var(--safe-b) + 100px);z-index:3;
+    display:flex;flex-direction:column;gap:16px;align-items:center;}
+  .act{width:54px;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;
+    transition:scale .15s var(--ease);will-change:scale;}
+  .act:active{scale:.96;}
+  .act::before{content:"";position:absolute;inset:-6px;}
+  .act .bubble{width:54px;height:54px;border-radius:27px;display:flex;align-items:center;justify-content:center;
+    background:#0d0c1180;backdrop-filter:blur(14px);
+    box-shadow:0 0 0 1px #f1ece21c, 0 6px 20px #00000066;
+    font-weight:900;font-size:.92rem;font-variant-numeric:tabular-nums;color:var(--cream);
+    transition:box-shadow .3s var(--ease);}
+  .act .bubble.gold{color:var(--gold);}
+  .act .bubble.ember{color:var(--ember);}
+  .act .lbl{font-size:.5rem;letter-spacing:.2em;text-transform:uppercase;color:#f1ece2a6;text-shadow:0 1px 4px #000;}
+  .act svg{width:21px;height:21px;stroke:var(--cream);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  .act[data-off] svg{opacity:.3;}
+  #streakAct .bubble.hot{box-shadow:0 0 0 1.5px var(--gold), 0 0 24px #e9bf6a59, 0 6px 20px #00000066;}
+
+  #pauseAct .bubble{position:relative;}
+  #pauseAct .ico{position:absolute;inset:0;margin:auto;transition:opacity .2s var(--ease), scale .2s var(--ease), filter .2s var(--ease);}
+  #pauseAct .ico.play{opacity:0;scale:.25;filter:blur(4px);fill:var(--cream);stroke:none;}
+  #pauseAct[data-paused] .ico.play{opacity:1;scale:1;filter:blur(0);}
+  #pauseAct[data-paused] .ico.pause{opacity:0;scale:.25;filter:blur(4px);}
+
+  #recAct .dot{width:18px;height:18px;border-radius:9px;background:var(--ember);
+    transition:border-radius .2s var(--ease), scale .2s var(--ease);}
+  #recAct[data-rec] .dot{border-radius:4px;scale:.78;}
+  #recAct[data-rec] .bubble{box-shadow:0 0 0 1.5px var(--ember), 0 0 22px #ff6b4a59, 0 6px 20px #00000066;}
+
+  #judge{position:absolute;top:32%;left:50%;translate:-50% -50%;z-index:2;
+    font-size:clamp(1.6rem,7vw,2.6rem);font-weight:900;text-transform:uppercase;letter-spacing:.06em;
+    opacity:0;pointer-events:none;text-shadow:0 2px 28px #000d;}
+
+  #caption{position:absolute;left:16px;right:80px;bottom:calc(var(--safe-b) + 20px);z-index:3;}
+  #caption .who{font-weight:700;font-size:.82rem;}
+  #caption .who b{color:var(--gold);font-weight:700;}
+  #caption .line{margin-top:5px;font-size:.9rem;line-height:1.45;color:#f1ece2cc;text-wrap:pretty;
+    text-shadow:0 1px 8px #000b;min-height:2.6em;}
+  .beatnum{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;
+    border-radius:11px;background:#f1ece21f;backdrop-filter:blur(8px);font-size:.7rem;font-weight:900;
+    font-variant-numeric:tabular-nums;margin-right:7px;vertical-align:-4px;color:var(--gold-hi);}
+
+  #sheetWrap{position:fixed;inset:0;z-index:8;visibility:hidden;}
+  #sheetWrap.open{visibility:visible;}
+  #sheetWrap .back{position:absolute;inset:0;background:#00000073;opacity:0;transition:opacity .25s var(--ease);}
+  #sheetWrap.open .back{opacity:1;}
+  #sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink2);border-radius:22px 22px 0 0;
+    padding:12px 22px calc(var(--safe-b) + 26px);
+    translate:0 105%;transition:translate .32s var(--ease);will-change:translate;
+    box-shadow:0 -1px 0 #f1ece214, 0 -16px 48px #000a;}
+  #sheetWrap.open #sheet{translate:0 0;}
+  #sheet .grab{width:36px;height:4px;border-radius:2px;background:#f1ece230;margin:0 auto 16px;}
+  #sheet .row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;min-height:44px;}
+  #sheet .row+.row{box-shadow:0 -1px 0 #f1ece20d;}
+  #sheet label{font-size:.6rem;letter-spacing:.26em;text-transform:uppercase;color:#f1ece273;}
+  #sheet input[type=range]{accent-color:var(--gold);width:52%;}
+  #bpmVal{font-weight:900;color:var(--gold);font-variant-numeric:tabular-nums;margin-left:8px;}
+  .switch{position:relative;width:46px;height:28px;}
+  .switch input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+  .switch i{position:absolute;inset:0;border-radius:14px;background:#f1ece226;transition:background .2s var(--ease);}
+  .switch i::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;
+    background:var(--cream);transition:translate .2s var(--ease);}
+  .switch input:checked + i{background:var(--gold);}
+  .switch input:checked + i::after{translate:18px 0;}
+
+  #overlay{position:fixed;inset:0;z-index:10;background:#0d0c11f2;backdrop-filter:blur(16px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    padding:28px;transition:opacity .5s var(--ease);}
+  #overlay.gone{opacity:0;pointer-events:none;}
+  #overlay .stagger{opacity:0;translate:0 16px;animation:up .6s var(--ease) forwards;}
+  #overlay .stagger:nth-child(2){animation-delay:.1s;}
+  #overlay .stagger:nth-child(3){animation-delay:.2s;}
+  #overlay .stagger:nth-child(4){animation-delay:.3s;}
+  @keyframes up{to{opacity:1;translate:0 0;}}
+  #overlay .mark{font-size:.62rem;letter-spacing:.5em;text-transform:uppercase;color:var(--gold);margin-bottom:18px;font-weight:700;}
+  #overlay h1{font-size:clamp(2.4rem,11vw,4rem);font-weight:900;text-transform:uppercase;line-height:.95;
+    letter-spacing:-.02em;text-wrap:balance;}
+  #overlay h1 span{background:linear-gradient(100deg,var(--gold-hi),var(--gold) 50%,var(--ember));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  #overlay p{color:#f1ece280;max-width:36ch;margin:18px 0 30px;line-height:1.55;font-size:.95rem;text-wrap:pretty;}
+  #startBtn{background:var(--cream);color:var(--ink);font-weight:900;text-transform:uppercase;letter-spacing:.12em;
+    padding:17px 44px;font-size:.95rem;border-radius:17px;
+    box-shadow:0 1px 0 #ffffff40 inset, 0 10px 34px #00000059;
+    transition:scale .15s var(--ease), box-shadow .25s var(--ease);will-change:scale;}
+  #startBtn:active{scale:.96;}
+  #startBtn:disabled{opacity:.5;}
+  #overlay .status{margin-top:18px;font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:#f1ece259;}
+
+  @media (prefers-reduced-motion:reduce){
+    #overlay .stagger{animation:none;opacity:1;translate:0 0;}
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <div id="pips" aria-hidden="true"></div>
+
+  <div id="head">
+    <span class="logo">KVM <span style="color:var(--gold);font-size:.62rem;vertical-align:6px">3D</span></span>
+    <span class="live" id="liveTag" hidden>LIVE</span>
+    <span class="live rec-pill" id="recPill" hidden><i></i>REC <span id="recTime">0:00</span></span>
+  </div>
+
+  <div id="frameGuide"></div>
+  <div id="frameMsg"></div>
+  <div id="countdown" aria-hidden="true"></div>
+  <div id="judge"></div>
+
+  <div id="rail">
+    <button class="act" id="recAct" aria-label="Record session">
+      <span class="bubble"><span class="dot"></span></span><span class="lbl">Rec</span>
+    </button>
+    <button class="act" id="pauseAct" aria-label="Pause or resume">
+      <span class="bubble">
+        <svg class="ico pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+        <svg class="ico play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+      </span><span class="lbl" id="pauseLbl">Pause</span>
+    </button>
+    <button class="act" aria-label="On-beat accuracy">
+      <span class="bubble gold" id="statAcc">0%</span><span class="lbl">On beat</span>
+    </button>
+    <button class="act" id="streakAct" aria-label="Streak">
+      <span class="bubble ember" id="statStreak">0</span><span class="lbl">Streak</span>
+    </button>
+    <button class="act" aria-label="Total hits">
+      <span class="bubble" id="statHits">0</span><span class="lbl">Hits</span>
+    </button>
+    <button class="act" id="voiceAct" aria-label="Toggle voice cues">
+      <span class="bubble"><svg viewBox="0 0 24 24"><path d="M12 3v10a3 3 0 1 1-2-2.83"/><path d="M16 5c2 1.5 2 6.5 0 8"/><path d="M19 3c3 2.5 3 9.5 0 12"/></svg></span>
+      <span class="lbl">Voice</span>
+    </button>
+    <button class="act" id="gearAct" aria-label="Settings">
+      <span class="bubble"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z"/></svg></span>
+      <span class="lbl">Tune</span>
+    </button>
+  </div>
+
+  <div id="caption">
+    <div class="who">@kvm_coach <b>· LV.1 Groove</b></div>
+    <div class="line" id="coachLine"><span class="beatnum" id="beatNum">–</span>Land your moves on the kick.</div>
+  </div>
+</div>
+
+<div id="sheetWrap">
+  <div class="back" id="sheetBack"></div>
+  <div id="sheet" role="dialog" aria-label="Settings">
+    <div class="grab"></div>
+    <div class="row">
+      <label>Tempo <span id="bpmVal">112</span></label>
+      <input type="range" id="bpm" min="90" max="126" value="112" step="1">
+    </div>
+    <div class="row">
+      <label>Voice cues</label>
+      <span class="switch"><input type="checkbox" id="voiceOn" checked><i></i></span>
+    </div>
+    <div class="row">
+      <label>Mannequin overlay</label>
+      <span class="switch"><input type="checkbox" id="skelOn" checked><i></i></span>
+    </div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="mark stagger">KVM · Groove Coach 3D</div>
+  <h1 class="stagger">Find <span>the pocket.</span></h1>
+  <p class="stagger">An amapiano groove starts, your body is tracked live, and a 3D mannequin ghosts your every move. Full body in frame — the coach won't start until your feet are visible.</p>
+  <button id="startBtn" class="stagger">Start dancing</button>
+  <div class="status stagger" id="loadStatus">All processing is local — no video leaves your device</div>
+</div>
+
+<script type="module">
+/* KVM Groove Coach 3D — pose + amapiano beat + voice + three.js grey mannequin. */
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js";
+
+const $ = id => document.getElementById(id);
+const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+const GOLD = "#e9bf6a", GOLD_HI = "#f5d896", EMBER = "#ff6b4a";
+
+const pips = $("pips");
+for(let i = 0; i < 8; i++){ const p = document.createElement("i"); if(i === 0) p.className = "one"; pips.appendChild(p); }
+
+/* ---------- state ---------- */
+let landmarker = null, audio = null;
+let phase = "idle";
+let bpm = 112, beatTimes = [], beatIndex = 0;
+let hits = 0, onBeatHits = 0, streak = 0, recent = [], lastSpeak = 0;
+
+$("bpm").oninput = e => { bpm = +e.target.value; $("bpmVal").textContent = bpm; };
+const sheetWrap = $("sheetWrap");
+$("gearAct").onclick = () => sheetWrap.classList.add("open");
+$("sheetBack").onclick = () => sheetWrap.classList.remove("open");
+$("voiceAct").onclick = () => {
+  const c = $("voiceOn"); c.checked = !c.checked;
+  $("voiceAct").toggleAttribute("data-off", !c.checked);
+};
+$("voiceOn").onchange = e => $("voiceAct").toggleAttribute("data-off", !e.target.checked);
+
+/* ---------- pause / resume ---------- */
+$("pauseAct").onclick = () => {
+  if(phase === "groove"){
+    phase = "paused";
+    audio.stop();
+    speechSynthesis.cancel();
+    $("pauseAct").setAttribute("data-paused", "");
+    $("pauseLbl").textContent = "Play";
+    $("liveTag").hidden = true;
+    [...pips.children].forEach(p => p.classList.remove("on"));
+    $("coachLine").innerHTML = `<span class="beatnum" id="beatNum">–</span>Paused — take a breath.`;
+  } else if(phase === "paused"){
+    phase = "groove";
+    audio.start();
+    $("pauseAct").removeAttribute("data-paused");
+    $("pauseLbl").textContent = "Pause";
+    $("liveTag").hidden = false;
+    speak("And we're back — five, six, seven, eight!", true);
+  }
+};
+
+/* ---------- record & save ---------- */
+let recorder = null, recChunks = [], recStart = 0, recTimerId = null;
+$("recAct").onclick = () => {
+  if(!audio) return;
+  if(recorder){ recorder.stop(); return; }
+  const stream = canvas.captureStream(30);
+  audio.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mime = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4" : "video/webm";
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6e6 });
+  recChunks = [];
+  recorder.ondataavailable = e => { if(e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    const ext = mime.includes("mp4") ? "mp4" : "webm";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(recChunks, { type: mime }));
+    a.download = `kvm-groove-${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    recorder = null;
+    clearInterval(recTimerId);
+    $("recPill").hidden = true;
+    $("recAct").removeAttribute("data-rec");
+    speak("Saved. That clip is yours.", true);
+  };
+  recorder.start();
+  recStart = performance.now();
+  $("recAct").setAttribute("data-rec", "");
+  $("recPill").hidden = false;
+  recTimerId = setInterval(() => {
+    const s = Math.floor((performance.now() - recStart) / 1000);
+    $("recTime").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }, 500);
+};
+
+/* ---------- voice ---------- */
+function speak(text, force){
+  const bn = $("beatNum")?.textContent ?? "–";
+  $("coachLine").innerHTML = `<span class="beatnum" id="beatNum">${bn}</span>${text}`;
+  if(!$("voiceOn").checked) return;
+  const now = performance.now();
+  if(!force && now - lastSpeak < 3500) return;
+  lastSpeak = now;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.volume = .9;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* ---------- amapiano engine ---------- */
+function makeAudio(){
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ac.createGain(); master.gain.value = .55; master.connect(ac.destination);
+  const dest = ac.createMediaStreamDestination(); master.connect(dest);
+  const kick = t => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(45, t + .12);
+    g.gain.setValueAtTime(.9, t); g.gain.exponentialRampToValueAtTime(.001, t + .28);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + .3);
+  };
+  const shaper = ac.createWaveShaper();
+  { const c = new Float32Array(256);
+    for(let i = 0; i < 256; i++){ const x = i / 128 - 1; c[i] = Math.tanh(2.2 * x); }
+    shaper.curve = c; }
+  const logGain = ac.createGain(); logGain.gain.value = .8;
+  shaper.connect(logGain); logGain.connect(master);
+  const logDrum = (t, f) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(f * 2.2, t); o.frequency.exponentialRampToValueAtTime(f, t + .06);
+    g.gain.setValueAtTime(.001, t); g.gain.exponentialRampToValueAtTime(.9, t + .012);
+    g.gain.exponentialRampToValueAtTime(.001, t + .38);
+    o.connect(g); g.connect(shaper); o.start(t); o.stop(t + .4);
+  };
+  const noise = (t, len, filterFn, vol) => {
+    const buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), d = buf.getChannelData(0);
+    for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+    const s = ac.createBufferSource(); s.buffer = buf;
+    const f = ac.createBiquadFilter(); filterFn(f);
+    const g = ac.createGain(); g.gain.value = vol;
+    s.connect(f); f.connect(g); g.connect(master); s.start(t);
+  };
+  const shaker = (t, acc) => noise(t, .06, f => { f.type = "bandpass"; f.frequency.value = 8500; f.Q.value = 1.2; }, acc ? .3 : .14);
+  const rim    = t => noise(t, .04, f => { f.type = "bandpass"; f.frequency.value = 1800; f.Q.value = 6; }, .5);
+
+  const A = 55, C = 65.4, E = 82.4, G = 98;
+  const PAT = { kick: [0,4,8,12], log: {3:C, 6:A, 10:E, 11:G, 14:A}, rim: [4,12] };
+
+  let nextStep = 0, step = 0, timer = null;
+  return {
+    ac, dest,
+    start(){
+      nextStep = ac.currentTime + .4; step = 0; beatTimes = []; beatIndex = 0;
+      timer = setInterval(() => {
+        const sps = 60 / bpm / 4;
+        while(nextStep < ac.currentTime + .25){
+          const s = step % 16, t = nextStep;
+          if(PAT.kick.includes(s)) kick(t);
+          if(PAT.log[s]) logDrum(t, PAT.log[s]);
+          if(PAT.rim.includes(s)) rim(t);
+          if(s % 2 === 0) shaker(t, s % 4 === 2);
+          if(s % 4 === 0){
+            beatTimes.push(t); if(beatTimes.length > 64) beatTimes.shift();
+            const idx = (beatIndex++) % 8;
+            setTimeout(() => onBeatVisual(idx), Math.max(0, (t - ac.currentTime) * 1000));
+          }
+          step++; nextStep += sps;
+        }
+      }, 60);
+    },
+    stop(){ clearInterval(timer); }
+  };
+}
+function onBeatVisual(idx){
+  [...pips.children].forEach((p, i) => p.classList.toggle("on", i === idx));
+  const bn = $("beatNum"); if(bn) bn.textContent = idx + 1;
+}
+
+/* ---------- judging ---------- */
+const nearestOffset = t => beatTimes.reduce((m, b) => Math.min(m, Math.abs(t - b)), Infinity);
+function flashJudge(text, color){
+  const j = $("judge"); j.textContent = text; j.style.color = color;
+  j.animate(
+    [{opacity: 0, translate: "-50% -50%", scale: .8},
+     {opacity: 1, translate: "-50% -50%", scale: 1, offset: .25},
+     {opacity: 0, translate: "-50% -60%", scale: 1.03}],
+    {duration: 620, easing: "cubic-bezier(0.2,0,0,1)"});
+}
+function registerHit(tSec){
+  const off = nearestOffset(tSec);
+  hits++;
+  const onBeat = off <= .19;
+  if(off <= .10) flashJudge("ON BEAT", GOLD_HI);
+  else if(onBeat) flashJudge("CLOSE", GOLD);
+  else            flashJudge("OFF", EMBER);
+  streak = onBeat ? streak + 1 : 0;
+  if(onBeat) onBeatHits++;
+  recent.push(onBeat); if(recent.length > 10) recent.shift();
+  try{ navigator.vibrate?.(onBeat ? 24 : 10); }catch(e){}
+  $("statHits").textContent = hits;
+  $("statStreak").textContent = streak;
+  $("statAcc").textContent = Math.round(onBeatHits / hits * 100) + "%";
+  $("streakAct").querySelector(".bubble").classList.toggle("hot", streak >= 4);
+  coachTick();
+}
+
+/* ---------- coaching ---------- */
+const LINES = {
+  hot:  ["That's the pocket — stay right there.", "Locked in. Don't think, just ride it.", "Yes! Keep that streak alive."],
+  warm: ["Almost — let the log drum move you.", "Land the move ON the boom, not after it.", "Smaller and sharper. Hit the one."],
+  cold: ["Reset. Listen for two bars, then move.", "Bounce in your knees first.", "You're rushing. Let the beat come to you."],
+  idle: ["I can't judge what I can't see — bigger moves!", "Give me something — bounce on the beat."]
+};
+const pick = a => a[Math.random() * a.length | 0];
+function coachTick(){
+  if(recent.length < 6) return;
+  const acc = recent.filter(Boolean).length / recent.length;
+  speak(pick(acc > .7 ? LINES.hot : acc > .4 ? LINES.warm : LINES.cold));
+}
+
+/* ---------- three.js grey mannequin ---------- */
+const SEGDEF = [
+  [23,25,4.2],[25,27,2.9],[24,26,4.2],[26,28,2.9],   // thighs, shins
+  [27,31,2.0],[28,32,2.0],                            // feet
+  [11,13,3.0],[13,15,2.2],[12,14,3.0],[14,16,2.2],   // arms
+  [15,19,1.6],[16,20,1.6]                             // hands
+];
+const JOINTS = [13,14,25,26,15,16,27,28];
+let T = null;                                          // three bundle
+
+function initThree(w, h){
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setSize(w, h, false);
+  const scene = new THREE.Scene();
+  const cam = new THREE.OrthographicCamera(0, w, 0, -h, -4000, 4000);
+  cam.position.z = 1000;
+  scene.add(new THREE.AmbientLight(0xffffff, .5));
+  const key = new THREE.DirectionalLight(0xfff2dd, 1.15); key.position.set(-.45, .8, 1); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x9aa4c8, .4);  rim.position.set(.6, -.3, .6); scene.add(rim);
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xb7b1a3, roughness: .5, metalness: .18,
+    transparent: true, opacity: .55, depthWrite: true,
+    emissive: new THREE.Color(0xe9bf6a), emissiveIntensity: .04
+  });
+  const capsuleGeo = new THREE.CapsuleGeometry(1, 1, 4, 14);   // total y-extent 3 at scale 1
+  const sphereGeo  = new THREE.SphereGeometry(1, 22, 16);
+
+  const segs = SEGDEF.map(() => { const m = new THREE.Mesh(capsuleGeo, mat); m.visible = false; scene.add(m); return m; });
+  const torso = new THREE.Mesh(capsuleGeo, mat); torso.visible = false; scene.add(torso);
+  const head  = new THREE.Mesh(sphereGeo, mat);  head.visible = false; scene.add(head);
+  const joints = JOINTS.map(() => { const m = new THREE.Mesh(sphereGeo, mat); m.visible = false; scene.add(m); return m; });
+  return { renderer, scene, cam, mat, segs, torso, head, joints };
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _d = new THREE.Vector3();
+
+function placeCapsule(mesh, ax, ay, az, bx, by, bz, r){
+  _a.set(ax, -ay, az); _b.set(bx, -by, bz);
+  const len = _a.distanceTo(_b);
+  if(len < 1e-3){ mesh.visible = false; return; }
+  mesh.visible = true;
+  mesh.position.copy(_a).add(_b).multiplyScalar(.5);
+  _d.copy(_b).sub(_a).normalize();
+  mesh.quaternion.setFromUnitVectors(UP, _d);
+  mesh.scale.set(r, len / 3, r);
+}
+
+function updateMannequin(lm, nearBeat){
+  const X = p => fit.dx + (1 - p.x) * fit.dw;
+  const Y = p => fit.dy + p.y * fit.dh;
+  const Z = p => -(p.z ?? 0) * fit.dw * .5;
+  const vis = i => (lm[i].visibility ?? 1) > .4;
+  const U = fit.dh / 160;
+
+  T.mat.emissiveIntensity = nearBeat ? .55 : .04;
+  T.mat.opacity = nearBeat ? .62 : .55;
+
+  SEGDEF.forEach(([a, b, r], i) => {
+    const m = T.segs[i];
+    if(!vis(a) || !vis(b)){ m.visible = false; return; }
+    placeCapsule(m, X(lm[a]), Y(lm[a]), Z(lm[a]), X(lm[b]), Y(lm[b]), Z(lm[b]), r * U);
+  });
+
+  if(vis(11) && vis(12) && vis(23) && vis(24)){
+    const sx = (X(lm[11]) + X(lm[12])) / 2, sy = (Y(lm[11]) + Y(lm[12])) / 2, sz = (Z(lm[11]) + Z(lm[12])) / 2;
+    const hx = (X(lm[23]) + X(lm[24])) / 2, hy = (Y(lm[23]) + Y(lm[24])) / 2, hz = (Z(lm[23]) + Z(lm[24])) / 2;
+    placeCapsule(T.torso, sx, sy, sz, hx, hy, hz, 7.5 * U);
+  } else T.torso.visible = false;
+
+  if(vis(0)){
+    T.head.visible = true;
+    T.head.position.set(X(lm[0]), -(Y(lm[0]) - U * 2), Z(lm[0]));
+    T.head.scale.setScalar(5.2 * U);
+  } else T.head.visible = false;
+
+  JOINTS.forEach((idx, i) => {
+    const m = T.joints[i];
+    if(!vis(idx)){ m.visible = false; return; }
+    m.visible = true;
+    m.position.set(X(lm[idx]), -Y(lm[idx]), Z(lm[idx]));
+    m.scale.setScalar((idx === 25 || idx === 26 ? 3.4 : 2.6) * U);
+  });
+
+  T.renderer.render(T.scene, T.cam);
+}
+
+/* ---------- pose ---------- */
+const TRACKED = [19,20,31,32];
+let prevLm = null, prevT = 0, energyEMA = 0, lastHitAt = 0, lastMoveAt = 0;
+let fit = {dx:0, dy:0, dw:0, dh:0};
+let frameOkSince = 0;
+
+function processPose(result, tMs){
+  const lm = result.landmarks?.[0];
+  drawFrame(lm);
+
+  if(phase === "framing"){
+    const ok = lm && (lm[0].visibility ?? 0) > .5 &&
+      ((lm[31].visibility ?? 0) > .5 || (lm[32].visibility ?? 0) > .5);
+    $("frameGuide").classList.toggle("ok", !!ok);
+    if(ok){
+      if(!frameOkSince) frameOkSince = tMs;
+      if(tMs - frameOkSince > 900) startCountIn();
+    } else frameOkSince = 0;
+    prevLm = lm || null; prevT = tMs;
+    return;
+  }
+  if(phase !== "groove" || !lm){ prevLm = lm || null; prevT = tMs; return; }
+
+  const tSec = audio.ac.currentTime;
+  if(prevLm){
+    const dt = Math.max(1e-3, (tMs - prevT) / 1000);
+    let sp = 0;
+    for(const i of TRACKED) sp += Math.hypot(lm[i].x - prevLm[i].x, lm[i].y - prevLm[i].y) / dt;
+    sp /= TRACKED.length;
+    const prevEMA = energyEMA;
+    energyEMA = energyEMA * .72 + sp * .28;
+    if(sp > .25) lastMoveAt = tMs;
+    if(energyEMA > .55 && prevEMA <= .55 && tSec - lastHitAt > (60 / bpm) * .45){
+      lastHitAt = tSec; registerHit(tSec);
+    }
+    if(tMs - lastMoveAt > 6000){ lastMoveAt = tMs; speak(pick(LINES.idle)); }
+  }
+  prevLm = lm; prevT = tMs;
+}
+
+function drawFrame(lm){
+  const w = canvas.width, h = canvas.height, vw = video.videoWidth, vh = video.videoHeight;
+  if(!vw) return;
+  const cover = Math.max(w / vw, h / vh), dw = vw * cover, dh = vh * cover;
+  fit = {dx: (w - dw) / 2, dy: (h - dh) / 2, dw, dh};
+  ctx.save();
+  ctx.translate(w, 0); ctx.scale(-1, 1);
+  ctx.drawImage(video, fit.dx, fit.dy, dw, dh);
+  ctx.restore();
+  ctx.fillStyle = "rgba(13,12,17,0.18)"; ctx.fillRect(0, 0, w, h);
+
+  if(!lm || !$("skelOn").checked){ return; }
+
+  // ground shadow (2D, under the 3D figure)
+  const X = p => fit.dx + (1 - p.x) * fit.dw, Y = p => fit.dy + p.y * fit.dh;
+  const vis = i => (lm[i].visibility ?? 1) > .4;
+  const U = fit.dh / 160;
+  if(vis(31) || vis(32)){
+    const gx = ((vis(31) ? X(lm[31]) : X(lm[32])) + (vis(32) ? X(lm[32]) : X(lm[31]))) / 2;
+    const gy = Math.max(vis(31) ? Y(lm[31]) : 0, vis(32) ? Y(lm[32]) : 0) + U * 3;
+    const sh = ctx.createRadialGradient(gx, gy, 0, gx, gy, U * 26);
+    sh.addColorStop(0, "#00000059"); sh.addColorStop(1, "transparent");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(gx, gy, U * 26, U * 6, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  const spb = 60 / bpm;
+  const since = beatTimes.length ? audio.ac.currentTime - beatTimes[beatTimes.length - 1] : 1;
+  const nearBeat = phase === "groove" && (since < .12 || since > spb - .12);
+  updateMannequin(lm, nearBeat);
+  ctx.drawImage(T.renderer.domElement, 0, 0);
+}
+
+/* ---------- loop ---------- */
+let lastVideoTime = -1;
+function loop(tMs){
+  if(phase === "idle") return;
+  if(video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    processPose(landmarker.detectForVideo(video, tMs), tMs);
+  }
+  requestAnimationFrame(loop);
+}
+
+function sizeCanvas(){
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+  if(T){
+    T.renderer.setSize(canvas.width, canvas.height, false);
+    T.cam.right = canvas.width; T.cam.bottom = -canvas.height;
+    T.cam.updateProjectionMatrix();
+  }
+}
+addEventListener("resize", sizeCanvas);
+
+/* ---------- phases ---------- */
+function startFraming(){
+  phase = "framing";
+  $("frameGuide").classList.add("show");
+  $("frameMsg").classList.add("show");
+  $("frameMsg").innerHTML = `Step back until your whole body fits<span class="sub">head to feet — the guide turns gold when you're set</span>`;
+  speak("Step back so I can see your feet.", true);
+}
+function startCountIn(){
+  phase = "countin";
+  $("frameGuide").classList.remove("show");
+  $("frameMsg").classList.remove("show");
+  const cd = $("countdown"), nums = ["5","6","7","8"];
+  speak("Five, six, seven, eight!", true);
+  nums.forEach((n, i) => setTimeout(() => {
+    cd.textContent = n;
+    cd.animate(
+      [{opacity: 0, scale: 1.3}, {opacity: 1, scale: 1, offset: .3}, {opacity: 0, scale: .92}],
+      {duration: 340, easing: "cubic-bezier(0.2,0,0,1)"});
+  }, i * 350));
+  setTimeout(() => {
+    phase = "groove";
+    $("liveTag").hidden = false;
+    audio.start();
+    speak("Move ON the kick drum.", true);
+  }, nums.length * 350 + 100);
+}
+
+/* ---------- boot ---------- */
+$("startBtn").onclick = async () => {
+  const btn = $("startBtn"), status = $("loadStatus");
+  btn.disabled = true;
+  try{
+    status.textContent = "Requesting camera…";
+    const portrait = innerHeight > innerWidth;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user",
+               width:  { ideal: portrait ? 720 : 1280 },
+               height: { ideal: portrait ? 1280 : 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    sizeCanvas();
+    T = initThree(canvas.width, canvas.height);
+
+    status.textContent = "Loading pose model…";
+    const fileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    landmarker = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO", numPoses: 1
+    });
+
+    audio = makeAudio();
+    await audio.ac.resume();
+
+    $("overlay").classList.add("gone");
+    startFraming();
+    requestAnimationFrame(loop);
+  }catch(err){
+    btn.disabled = false;
+    status.textContent = "⚠ " + (err.name === "NotAllowedError"
+      ? "Camera denied — allow access and retry."
+      : "Failed: " + err.message);
+  }
+};
+</script>
+</body>
+</html>

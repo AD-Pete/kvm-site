@@ -168,8 +168,8 @@
   <div id="sheet" role="dialog" aria-label="Settings">
     <div class="grab"></div>
     <div class="row">
-      <label>Tempo <span id="bpmVal">96</span></label>
-      <input type="range" id="bpm" min="70" max="130" value="96" step="1">
+      <label>Tempo <span id="bpmVal">112</span></label>
+      <input type="range" id="bpm" min="90" max="126" value="112" step="1">
     </div>
     <div class="row">
       <label>Voice cues</label>
@@ -204,7 +204,7 @@ for(let i = 0; i < 8; i++){ const p = document.createElement("i"); if(i === 0) p
 
 /* ---------- state ---------- */
 let landmarker = null, audio = null, running = false;
-let bpm = 96, beatTimes = [], beatIndex = 0;
+let bpm = 112, beatTimes = [], beatIndex = 0;
 let hits = 0, onBeatHits = 0, streak = 0, recent = [], lastSpeak = 0;
 
 $("bpm").oninput = e => { bpm = +e.target.value; $("bpmVal").textContent = bpm; };
@@ -235,37 +235,70 @@ function speak(text, force){
   }catch(e){}
 }
 
-/* ---------- beat engine ---------- */
+/* ---------- beat engine: amapiano groove, fully synthesized ---------- */
 function makeAudio(){
   const ac = new (window.AudioContext || window.webkitAudioContext)();
-  const master = ac.createGain(); master.gain.value = 0.5; master.connect(ac.destination);
+  const master = ac.createGain(); master.gain.value = 0.55; master.connect(ac.destination);
+
   const kick = t => {
     const o = ac.createOscillator(), g = ac.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + .11);
-    g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(.001, t + .24);
-    o.connect(g); g.connect(master); o.start(t); o.stop(t + .26);
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(45, t + .12);
+    g.gain.setValueAtTime(.9, t); g.gain.exponentialRampToValueAtTime(.001, t + .28);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + .3);
   };
-  const hat = t => {
-    const buf = ac.createBuffer(1, ac.sampleRate * .05, ac.sampleRate), d = buf.getChannelData(0);
+  // the amapiano signature: pitched log drum with a falling envelope + soft saturation
+  const shaper = ac.createWaveShaper();
+  { const c = new Float32Array(256);
+    for(let i = 0; i < 256; i++){ const x = i / 128 - 1; c[i] = Math.tanh(2.2 * x); }
+    shaper.curve = c; }
+  const logGain = ac.createGain(); logGain.gain.value = .8;
+  shaper.connect(logGain); logGain.connect(master);
+  const logDrum = (t, f) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(f * 2.2, t); o.frequency.exponentialRampToValueAtTime(f, t + .06);
+    g.gain.setValueAtTime(.001, t); g.gain.exponentialRampToValueAtTime(.9, t + .012);
+    g.gain.exponentialRampToValueAtTime(.001, t + .38);
+    o.connect(g); g.connect(shaper); o.start(t); o.stop(t + .4);
+  };
+  const noise = (t, len, filterFn, vol) => {
+    const buf = ac.createBuffer(1, ac.sampleRate * len, ac.sampleRate), d = buf.getChannelData(0);
     for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
     const s = ac.createBufferSource(); s.buffer = buf;
-    const hp = ac.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 7000;
-    const g = ac.createGain(); g.gain.value = .22;
-    s.connect(hp); hp.connect(g); g.connect(master); s.start(t);
+    const f = ac.createBiquadFilter(); filterFn(f);
+    const g = ac.createGain(); g.gain.value = vol;
+    s.connect(f); f.connect(g); g.connect(master); s.start(t);
   };
-  let nextBeat = 0, timer = null;
+  const shaker = (t, acc) => noise(t, .06, f => { f.type = "bandpass"; f.frequency.value = 8500; f.Q.value = 1.2; }, acc ? .3 : .14);
+  const rim    = t => noise(t, .04, f => { f.type = "bandpass"; f.frequency.value = 1800; f.Q.value = 6; }, .5);
+
+  /* one bar = 16 steps. A=55Hz pentatonic-ish log drum line. */
+  const A = 55, C = 65.4, E = 82.4, G = 98;
+  const PAT = {
+    kick:  [0, 4, 8, 12],                       // steady pulse so the dancer can find it
+    log:   {3: C, 6: A, 10: E, 11: G, 14: A},   // syncopated log drum answers
+    rim:   [4, 12],                             // the 2 and the 4
+  };
+
+  let nextStep = 0, step = 0, timer = null;
   return {
     ac,
     start(){
-      nextBeat = ac.currentTime + .4; beatTimes = []; beatIndex = 0;
+      nextStep = ac.currentTime + .4; step = 0; beatTimes = []; beatIndex = 0;
       timer = setInterval(() => {
-        const spb = 60 / bpm;
-        while(nextBeat < ac.currentTime + .25){
-          kick(nextBeat); hat(nextBeat + spb / 2);
-          beatTimes.push(nextBeat); if(beatTimes.length > 64) beatTimes.shift();
-          const idx = (beatIndex++) % 8;
-          setTimeout(() => onBeatVisual(idx), Math.max(0, (nextBeat - ac.currentTime) * 1000));
-          nextBeat += spb;
+        const sps = 60 / bpm / 4;               // seconds per 16th step
+        while(nextStep < ac.currentTime + .25){
+          const s = step % 16, t = nextStep;
+          if(PAT.kick.includes(s)) kick(t);
+          if(PAT.log[s]) logDrum(t, PAT.log[s]);
+          if(PAT.rim.includes(s)) rim(t);
+          if(s % 2 === 0) shaker(t, s % 4 === 2); // running 8th shakers, off-beat accent
+          if(s % 4 === 0){                        // quarter note = the judged beat
+            beatTimes.push(t); if(beatTimes.length > 64) beatTimes.shift();
+            const idx = (beatIndex++) % 8;
+            setTimeout(() => onBeatVisual(idx), Math.max(0, (t - ac.currentTime) * 1000));
+          }
+          step++; nextStep += sps;
         }
       }, 60);
     },

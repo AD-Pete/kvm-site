@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>KVM — How It Works</title>
+<style>
+  :root{
+    --ink:#0a0a0f;
+    --bone:#f4f1ea;
+    --magenta:#ff2d78;
+    --volt:#c8ff2d;
+    --violet:#6c3bff;
+    --grain-op:.06;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scrollbar-width:thin;scrollbar-color:var(--magenta) var(--ink);}
+  html.lenis, html.lenis body{height:auto;}
+  .lenis.lenis-smooth{scroll-behavior:auto!important;}
+  body{
+    background:var(--ink);
+    color:var(--bone);
+    font-family:"Archivo","Helvetica Neue",Arial,sans-serif;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--volt);color:var(--ink);}
+
+  /* ---------- layers ---------- */
+  #vanta-bg{position:fixed;inset:0;z-index:0;pointer-events:none;}
+  #grain{position:fixed;inset:-50%;width:200%;height:200%;z-index:2;pointer-events:none;opacity:var(--grain-op);
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+    animation:grain 8s steps(10) infinite;}
+  @keyframes grain{
+    0%,100%{transform:translate(0,0)}10%{transform:translate(-5%,-8%)}30%{transform:translate(3%,-15%)}
+    50%{transform:translate(12%,9%)}70%{transform:translate(9%,4%)}90%{transform:translate(-1%,7%)}
+  }
+  main{position:relative;z-index:1;}
+
+  /* ---------- nav ---------- */
+  nav{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;align-items:center;
+    padding:1.4rem 2rem;mix-blend-mode:difference;}
+  nav .logo{font-weight:900;font-size:1.25rem;letter-spacing:.12em;}
+  nav .tag{font-size:.7rem;letter-spacing:.3em;text-transform:uppercase;opacity:.8;}
+
+  /* ---------- hero ---------- */
+  .hero{min-height:100svh;display:flex;flex-direction:column;justify-content:center;padding:0 4vw;position:relative;}
+  .hero .kicker{font-size:clamp(.65rem,1vw,.8rem);letter-spacing:.45em;text-transform:uppercase;color:var(--volt);
+    margin-bottom:2rem;font-weight:600;}
+  .hero h1{
+    font-size:clamp(3.2rem,13vw,12rem);
+    line-height:.88;font-weight:900;letter-spacing:-.03em;text-transform:uppercase;
+  }
+  .hero h1 .line{display:block;overflow:hidden;}
+  .hero h1 .line-inner{display:inline-block;will-change:transform;}
+  .hero h1 .shaded{
+    background:linear-gradient(100deg,var(--magenta) 0%,var(--violet) 35%,var(--volt) 70%,var(--magenta) 100%);
+    background-size:300% 100%;
+    -webkit-background-clip:text;background-clip:text;
+    color:transparent;
+    animation:sweep 7s linear infinite;
+  }
+  @keyframes sweep{to{background-position:300% 0;}}
+  .hero .sub{max-width:34ch;margin-top:2.5rem;font-size:clamp(1rem,1.5vw,1.3rem);line-height:1.5;color:#b8b4aa;}
+  .hero .scroll-cue{position:absolute;bottom:2.2rem;left:4vw;display:flex;align-items:center;gap:.8rem;
+    font-size:.65rem;letter-spacing:.35em;text-transform:uppercase;color:#777;}
+  .hero .scroll-cue .bar{width:1px;height:44px;background:linear-gradient(var(--magenta),transparent);
+    animation:drop 1.6s ease-in-out infinite;transform-origin:top;}
+  @keyframes drop{0%{transform:scaleY(0)}45%{transform:scaleY(1)}100%{transform:scaleY(0);transform-origin:bottom}}
+
+  /* ---------- marquee ---------- */
+  .marquee{overflow:hidden;padding:2.2rem 0;border-top:1px solid #ffffff14;border-bottom:1px solid #ffffff14;
+    background:#0d0d14cc;backdrop-filter:blur(6px);}
+  .marquee .track{display:flex;gap:3rem;white-space:nowrap;will-change:transform;width:max-content;}
+  .marquee span{font-size:clamp(1.2rem,2.6vw,2rem);font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--bone);}
+  .marquee span.o{color:transparent;-webkit-text-stroke:1px var(--magenta);}
+
+  /* ---------- section shell ---------- */
+  section{position:relative;padding:16vh 4vw;}
+  .label{font-size:.7rem;letter-spacing:.4em;text-transform:uppercase;color:var(--volt);font-weight:700;margin-bottom:1.2rem;}
+  .big{font-size:clamp(2.2rem,6.5vw,5.5rem);font-weight:900;line-height:.95;letter-spacing:-.02em;text-transform:uppercase;}
+  .big .drift{display:block;will-change:transform;}
+  .body-copy{color:#b8b4aa;font-size:clamp(1rem,1.35vw,1.2rem);line-height:1.65;max-width:52ch;}
+
+  /* ---------- pinned funnel ---------- */
+  #funnel{padding:0;}
+  .funnel-pin{height:100svh;display:flex;align-items:center;overflow:hidden;position:relative;}
+  .funnel-stage{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 6vw;}
+  .funnel-stage .num{
+    font-size:clamp(9rem,32vw,30rem);font-weight:900;line-height:1;
+    color:transparent;-webkit-text-stroke:1.5px #ffffff22;
+    position:absolute;right:2vw;top:50%;transform:translateY(-50%);pointer-events:none;user-select:none;
+  }
+  .funnel-stage h3{font-size:clamp(2.6rem,8vw,7rem);font-weight:900;text-transform:uppercase;letter-spacing:-.02em;line-height:.92;}
+  .funnel-stage h3 em{font-style:normal;color:var(--magenta);}
+  .funnel-stage h3 .accent2{color:var(--volt);}
+  .funnel-stage p{margin-top:1.6rem;max-width:44ch;color:#b8b4aa;font-size:clamp(.95rem,1.4vw,1.25rem);line-height:1.6;}
+  .funnel-progress{position:absolute;left:6vw;bottom:8vh;display:flex;gap:.6rem;z-index:3;}
+  .funnel-progress i{width:44px;height:2px;background:#ffffff22;display:block;position:relative;overflow:hidden;}
+  .funnel-progress i::after{content:"";position:absolute;inset:0;background:var(--volt);transform:scaleX(0);transform-origin:left;transition:transform .4s ease;}
+  .funnel-progress i.on::after{transform:scaleX(1);}
+
+  /* ---------- cards ---------- */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2rem;margin-top:5rem;}
+  .card{
+    border:1px solid #ffffff14;background:#12121acc;backdrop-filter:blur(8px);
+    padding:2.2rem 1.8rem;min-height:340px;display:flex;flex-direction:column;justify-content:space-between;
+    position:relative;overflow:hidden;transition:border-color .35s ease;
+  }
+  .card::before{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,50%),#ff2d7822,transparent 60%);
+    opacity:0;transition:opacity .35s ease;pointer-events:none;}
+  .card:hover::before{opacity:1;}
+  .card:hover{border-color:#ff2d7855;}
+  .card .idx{font-size:.7rem;letter-spacing:.3em;color:var(--magenta);font-weight:700;}
+  .card h4{font-size:clamp(1.3rem,2vw,1.8rem);font-weight:800;text-transform:uppercase;line-height:1.05;margin:1rem 0;}
+  .card p{color:#a09c92;font-size:.95rem;line-height:1.6;}
+
+  /* ---------- AR duet spectacle ---------- */
+  #duet{padding:0;}
+  .duet-pin{height:100svh;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+  .duet-copy{position:absolute;top:12vh;left:6vw;z-index:4;max-width:520px;}
+  .duet-copy .big{font-size:clamp(2rem,5.5vw,4.6rem);}
+  .duet-floor{
+    position:absolute;bottom:0;left:0;right:0;height:38vh;
+    background:
+      linear-gradient(transparent, #6c3bff10 60%),
+      repeating-linear-gradient(90deg,#ffffff08 0 1px,transparent 1px 8vw),
+      repeating-linear-gradient(0deg,#ffffff08 0 1px,transparent 1px 8vh);
+    transform:perspective(700px) rotateX(58deg);transform-origin:bottom;
+  }
+  .dancers{position:absolute;bottom:9vh;left:50%;transform:translateX(-50%);display:flex;gap:clamp(2rem,9vw,9rem);align-items:flex-end;z-index:3;}
+  .figure{width:clamp(90px,15vw,170px);height:auto;}
+  .figure.student path{stroke:var(--bone);}
+  .figure.avatar{opacity:0;filter:drop-shadow(0 0 18px #ff2d7890);}
+  .figure.avatar path{stroke:var(--magenta);stroke-dasharray:6 5;}
+  .counts{position:absolute;bottom:52vh;left:50%;transform:translateX(-50%);display:flex;gap:clamp(1rem,4vw,3rem);z-index:3;}
+  .counts b{font-size:clamp(2rem,6vw,5rem);font-weight:900;color:transparent;-webkit-text-stroke:1px #ffffff33;transition:none;}
+  .counts b.hit{color:var(--volt);-webkit-text-stroke:0;text-shadow:0 0 30px #c8ff2d66;}
+  .duet-callout{position:absolute;z-index:4;right:6vw;bottom:14vh;max-width:300px;border-left:2px solid var(--volt);padding-left:1rem;
+    font-size:.9rem;color:#b8b4aa;line-height:1.55;opacity:0;}
+  .duet-callout strong{color:var(--bone);display:block;text-transform:uppercase;letter-spacing:.15em;font-size:.72rem;margin-bottom:.4rem;}
+
+  /* ---------- projection ---------- */
+  #projection .stage-wrap{margin-top:5rem;position:relative;height:52vh;min-height:380px;
+    border:1px solid #ffffff14;background:#0d0d14;overflow:hidden;}
+  #projection .stage-glow{position:absolute;inset:auto 0 0 0;height:55%;
+    background:radial-gradient(60% 90% at 50% 100%, #6c3bff33, transparent 70%);}
+  .tiles{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;gap:1rem;padding-bottom:3rem;}
+  .tile{width:clamp(54px,8vw,96px);aspect-ratio:3/4;border:1px solid #ffffff22;background:#16161f;position:relative;overflow:hidden;will-change:transform;}
+  .tile::after{content:"";position:absolute;inset:0;background:linear-gradient(160deg,transparent 40%, #ff2d7826);}
+  .tile svg{position:absolute;inset:12% 20%;width:60%;height:76%;}
+  .tile svg path{stroke:#e8e4da;stroke-width:5;fill:none;stroke-linecap:round;}
+  .tile:nth-child(odd) svg path{stroke:var(--magenta);}
+  #projection .stage-label{position:absolute;top:1.4rem;left:1.6rem;font-size:.65rem;letter-spacing:.35em;text-transform:uppercase;color:#777;}
+  #projection .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--magenta);margin-right:.5rem;
+    animation:pulse 1.4s ease-in-out infinite;}
+  @keyframes pulse{50%{opacity:.3}}
+
+  /* ---------- training ---------- */
+  #training .path{margin-top:5rem;position:relative;padding-left:2rem;}
+  #training .path::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:#ffffff18;}
+  #training .path .fill{position:absolute;left:0;top:8px;width:2px;background:linear-gradient(var(--volt),var(--magenta));transform-origin:top;transform:scaleY(0);}
+  .step{padding:2rem 0 2rem 2rem;position:relative;max-width:640px;}
+  .step::before{content:"";position:absolute;left:-2.45rem;top:2.55rem;width:11px;height:11px;border-radius:50%;
+    background:var(--ink);border:2px solid #ffffff33;}
+  .step.lit::before{border-color:var(--volt);background:var(--volt);box-shadow:0 0 16px #c8ff2d88;}
+  .step h4{font-size:clamp(1.2rem,2.2vw,1.7rem);font-weight:800;text-transform:uppercase;}
+  .step h4 span{color:var(--magenta);margin-right:.6rem;}
+  .step p{color:#a09c92;margin-top:.5rem;line-height:1.6;font-size:.95rem;max-width:48ch;}
+
+  /* ---------- tribe ---------- */
+  #tribe{text-align:center;padding-bottom:20vh;}
+  #tribe .counter{font-size:clamp(6rem,22vw,20rem);font-weight:900;line-height:1;letter-spacing:-.04em;
+    background:linear-gradient(100deg,var(--volt),var(--magenta) 60%,var(--violet));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  #tribe .body-copy{margin:2rem auto 0;}
+
+  /* ---------- footer ---------- */
+  footer{padding:14vh 4vw 8vh;border-top:1px solid #ffffff14;position:relative;z-index:1;background:#0a0a0fd9;backdrop-filter:blur(8px);}
+  footer .cta{font-size:clamp(2.4rem,8vw,7rem);font-weight:900;text-transform:uppercase;line-height:.95;letter-spacing:-.02em;}
+  footer .cta a{color:inherit;text-decoration:none;position:relative;display:inline-block;}
+  footer .cta a::after{content:"";position:absolute;left:0;bottom:.05em;height:.08em;width:100%;background:var(--magenta);
+    transform:scaleX(0);transform-origin:left;transition:transform .5s cubic-bezier(.7,0,.2,1);}
+  footer .cta a:hover::after{transform:scaleX(1);}
+  footer .meta{display:flex;justify-content:space-between;margin-top:6rem;font-size:.7rem;letter-spacing:.25em;text-transform:uppercase;color:#666;flex-wrap:wrap;gap:1rem;}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:820px){
+    .cards{grid-template-columns:1fr;}
+    .card{min-height:0;}
+    .funnel-stage .num{opacity:.5;font-size:38vw;top:auto;bottom:4vh;transform:none;}
+    .duet-copy{left:4vw;right:4vw;max-width:none;}
+    .duet-callout{right:4vw;bottom:6vh;max-width:240px;font-size:.8rem;}
+    .counts{bottom:56vh;}
+    section{padding:12vh 6vw;}
+    nav{padding:1.1rem 1.4rem;}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #grain,.hero h1 .shaded,.marquee .track{animation:none!important;}
+    .hero .scroll-cue .bar{animation:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="vanta-bg"></div>
+<div id="grain"></div>
+
+<nav>
+  <div class="logo">KVM</div>
+  <div class="tag">How it works</div>
+</nav>
+
+<main>
+
+  <!-- HERO -->
+  <header class="hero">
+    <p class="kicker">Digital classes &middot; AR training &middot; Tribe</p>
+    <h1 aria-label="The room just got bigger">
+      <span class="line"><span class="line-inner">The room</span></span>
+      <span class="line"><span class="line-inner shaded">just got</span></span>
+      <span class="line"><span class="line-inner">bigger.</span></span>
+    </h1>
+    <p class="sub">KVM takes what happens on the studio floor — the teaching, the correction, the energy — and puts it anywhere a dancer can stand.</p>
+    <div class="scroll-cue"><span class="bar"></span>Scroll</div>
+  </header>
+
+  <!-- MARQUEE -->
+  <div class="marquee" aria-hidden="true">
+    <div class="track" id="marqueeTrack">
+      <span>Learn</span><span class="o">Train</span><span>Dance</span><span class="o">Together</span>
+      <span>Learn</span><span class="o">Train</span><span>Dance</span><span class="o">Together</span>
+      <span>Learn</span><span class="o">Train</span><span>Dance</span><span class="o">Together</span>
+      <span>Learn</span><span class="o">Train</span><span>Dance</span><span class="o">Together</span>
+    </div>
+  </div>
+
+  <!-- PINNED FUNNEL -->
+  <section id="funnel" aria-label="The three stages">
+    <div class="funnel-pin" id="funnelPin">
+      <div class="funnel-stage" data-stage="0">
+        <div class="num">01</div>
+        <h3>Step <em>in.</em></h3>
+        <p>Clips from the floor, classes in the city, the culture doing what it does. This is where you find us — or we find you.</p>
+      </div>
+      <div class="funnel-stage" data-stage="1">
+        <div class="num">02</div>
+        <h3><em>Export</em><br>the room.</h3>
+        <p>Digital Classes: the full KVM library on demand, weekly live sessions, and an instructor who shows up in <span style="color:var(--bone)">your</span> room.</p>
+      </div>
+      <div class="funnel-stage" data-stage="2">
+        <div class="num">03</div>
+        <h3><span class="accent2">Convert</span><br>for life.</h3>
+        <p>KVM Training — a gamified path that tells you exactly what to do next — and TRIBE, the community that makes it permanent.</p>
+      </div>
+      <div class="funnel-progress" id="funnelProgress"><i class="on"></i><i></i><i></i></div>
+    </div>
+  </section>
+
+  <!-- DIGITAL CLASSES -->
+  <section id="classes">
+    <p class="label">02 — Export &middot; Digital Classes</p>
+    <h2 class="big">
+      <span class="drift" data-dir="-1">Anytime.</span>
+      <span class="drift" data-dir="1">Anywhere.</span>
+      <span class="drift" data-dir="-1">Actually corrected.</span>
+    </h2>
+    <div class="cards">
+      <article class="card">
+        <div><span class="idx">A — LIBRARY</span>
+          <h4>On-demand, on subscription</h4>
+          <p>Full classes and broken-down tutorials, structured by level and style. Mirrored playback, speed control, weekly drops. A library, not a dump of VODs.</p>
+        </div>
+      </article>
+      <article class="card">
+        <div><span class="idx">B — LIVE AR PARTNER</span>
+          <h4>Your instructor, in the room with you</h4>
+          <p>Point your camera at yourself and a live avatar of your KVM instructor appears beside you in AR — dancing the combo with you, reacting in real time, correcting in their own voice. A duet, not a scorecard.</p>
+        </div>
+      </article>
+      <article class="card">
+        <div><span class="idx">C — WEEKLY LIVES</span>
+          <h4>One floor, every dancer</h4>
+          <p>Scheduled live classes with the remote crowd projected into the room. The instructor can pull you forward for a shout-out from anywhere on earth.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- AR DUET SPECTACLE -->
+  <section id="duet" aria-label="The AR duet">
+    <div class="duet-pin" id="duetPin">
+      <div class="duet-copy">
+        <p class="label">The signature move</p>
+        <h2 class="big">Dance <em style="font-style:normal;color:var(--magenta)">with</em> them.<br>Not after them.</h2>
+      </div>
+      <div class="counts" id="counts" aria-hidden="true">
+        <b>5</b><b>6</b><b>7</b><b>8</b>
+      </div>
+      <div class="dancers" aria-hidden="true">
+        <svg class="figure student" viewBox="0 0 100 160" fill="none" stroke-width="5" stroke-linecap="round">
+          <circle cx="50" cy="22" r="13" stroke="#f4f1ea"/>
+          <path d="M50 35 L50 88"/><path d="M50 48 L20 70"/><path d="M50 48 L80 30"/>
+          <path d="M50 88 L28 140"/><path d="M50 88 L72 138"/>
+        </svg>
+        <svg class="figure avatar" id="avatarFig" viewBox="0 0 100 160" fill="none" stroke-width="5" stroke-linecap="round">
+          <circle cx="50" cy="22" r="13"/>
+          <path d="M50 35 L50 88"/><path d="M50 48 L20 70"/><path d="M50 48 L80 30"/>
+          <path d="M50 88 L28 140"/><path d="M50 88 L72 138"/>
+        </svg>
+      </div>
+      <div class="duet-floor"></div>
+      <div class="duet-callout" id="duetCallout">
+        <strong>Live correction</strong>
+        “Your arm hits a beat late in count 5–6.” Spoken in your instructor’s voice, shown on their avatar — the limb that’s off glows, the count calls out.
+      </div>
+    </div>
+  </section>
+
+  <!-- PROJECTION -->
+  <section id="projection">
+    <p class="label">Weekly lives &middot; Projection</p>
+    <h2 class="big">
+      <span class="drift" data-dir="1">The studio is</span>
+      <span class="drift" data-dir="-1">everywhere now.</span>
+    </h2>
+    <p class="body-copy" style="margin-top:2rem">The same AR pipeline runs in reverse: dancers at home are captured and projected into the live class — onto the studio screen, into the instructor’s view, into the stream grid. Remote students stop being an audience and become the room.</p>
+    <div class="stage-wrap">
+      <span class="stage-label"><span class="live-dot"></span>KVM Live — Thursday session</span>
+      <div class="stage-glow"></div>
+      <div class="tiles" id="tiles">
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L24 66 M50 48 L78 34 M50 88 L30 138 M50 88 L70 136"/></svg></div>
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L20 40 M50 48 L80 62 M50 88 L26 132 M50 88 L74 140"/></svg></div>
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L26 72 M50 48 L74 26 M50 88 L34 140 M50 88 L68 130"/></svg></div>
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L22 54 M50 48 L82 44 M50 88 L28 136 M50 88 L72 138"/></svg></div>
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L18 62 M50 48 L76 30 M50 88 L32 138 M50 88 L70 134"/></svg></div>
+        <div class="tile"><svg viewBox="0 0 100 160"><circle cx="50" cy="22" r="12" fill="none"/><path d="M50 35 L50 88 M50 48 L28 68 M50 48 L80 52 M50 88 L26 134 M50 88 L74 136"/></svg></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRAINING -->
+  <section id="training">
+    <p class="label">03 — Convert &middot; KVM Training</p>
+    <h2 class="big">
+      <span class="drift" data-dir="-1">Duolingo,</span>
+      <span class="drift" data-dir="1">for dance.</span>
+    </h2>
+    <p class="body-copy" style="margin-top:2rem">A structured path, not a content pile. Skills unlock in sequence, streaks keep you honest, and every level is passed the only way that counts — on video, verified by the same engine that dances beside you.</p>
+    <div class="path" id="trainPath">
+      <div class="fill" id="trainFill"></div>
+      <div class="step"><h4><span>LV.1</span>Groove</h4><p>Find the pocket. Daily practice check-ins — film 60 seconds, keep the streak alive.</p></div>
+      <div class="step"><h4><span>LV.2</span>Foundation</h4><p>The steps that everything else stands on. Pass by submitting video — the engine verifies your lines and timing.</p></div>
+      <div class="step"><h4><span>LV.3</span>Texture &amp; combos</h4><p>Leagues and cohorts — small groups progressing together, because solo grinding isn't the culture.</p></div>
+      <div class="step"><h4><span>LV.4</span>Freestyle</h4><p>Weekly prompts, community voting. Structured training becomes actual dancing.</p></div>
+    </div>
+  </section>
+
+  <!-- TRIBE -->
+  <section id="tribe">
+    <p class="label">Convert &middot; TRIBE</p>
+    <div class="counter" id="tribeCounter">000</div>
+    <h2 class="big" style="margin-top:1rem">dancers deep.</h2>
+    <p class="body-copy">TRIBE is KVM’s community — 150 committed dancers, each one a node with their own following and crew. For members: early access, identity, a real say in the culture. For brands, promoters and events: a direct, leveraged channel into the culture — with KVM as the gatekeeper. TRIBE gets members opportunities. It never sells them.</p>
+  </section>
+
+</main>
+
+<footer>
+  <p class="label">Next step</p>
+  <div class="cta"><a href="#">Get on the floor&nbsp;&rarr;</a></div>
+  <div class="meta">
+    <span>KVM &copy; 2026</span>
+    <span>Learn &middot; Train &middot; Dance &middot; Together</span>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1/dist/lenis.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.fog.min.js"></script>
+<script>
+(function(){
+  const q = new URLSearchParams(location.search);
+  const reduced = q.has('motion') ? false : window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mobile = window.matchMedia('(max-width: 820px)').matches;
+  gsap.registerPlugin(ScrollTrigger);
+
+  /* ---------- Lenis + ScrollTrigger sync ---------- */
+  let lenis = null;
+  if(!reduced){
+    lenis = new Lenis({ duration: 1.15, easing: t => Math.min(1, 1.001 - Math.pow(2, -10 * t)) });
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add(t => lenis.raf(t * 1000));
+    gsap.ticker.lagSmoothing(0);
+  }
+
+  /* ---------- Vanta fog background ---------- */
+  let vanta = null;
+  if(!reduced && window.VANTA){
+    try{
+      vanta = VANTA.FOG({
+        el: "#vanta-bg",
+        mouseControls: true, touchControls: true, gyroControls: false,
+        highlightColor: 0xff2d78,
+        midtoneColor: 0x6c3bff,
+        lowlightColor: 0x11041f,
+        baseColor: 0x0a0a0f,
+        blurFactor: 0.55,
+        speed: 1.4,
+        zoom: mobile ? 0.6 : 0.9
+      });
+    }catch(e){ /* fallback: flat ink background is fine */ }
+  }
+
+  if(reduced){
+    // Reveal everything statically and stop here.
+    gsap.set('.hero .line-inner, .duet-callout, .figure.avatar', {opacity:1, y:0, x:0});
+    document.querySelectorAll('.step').forEach(s=>s.classList.add('lit'));
+    document.getElementById('tribeCounter').textContent = '150';
+    document.getElementById('trainFill').style.transform = 'scaleY(1)';
+    return;
+  }
+
+  /* ---------- Hero entrance ---------- */
+  gsap.from('.hero .line-inner', { yPercent: 110, duration: 1.2, ease: 'power4.out', stagger: 0.12, delay: 0.15 });
+  gsap.from('.hero .kicker, .hero .sub', { opacity: 0, y: 24, duration: 1, ease: 'power3.out', stagger: 0.15, delay: 0.5 });
+
+  // Scroll-velocity skew on hero type
+  const heroLines = gsap.utils.toArray('.hero .line-inner');
+  const skewSetter = gsap.quickTo ? null : null;
+  let proxySkew = { v: 0 };
+  ScrollTrigger.create({
+    onUpdate(self){
+      const skew = gsap.utils.clamp(-8, 8, self.getVelocity() / -300);
+      gsap.to(heroLines, { skewX: skew, duration: 0.4, ease: 'power3.out', overwrite: 'auto' });
+    }
+  });
+
+  // Hero drifts apart on scroll
+  gsap.to('.hero h1 .line:nth-child(1) .line-inner', { xPercent: -12, scrollTrigger:{ trigger:'.hero', start:'top top', end:'bottom top', scrub: 1 }});
+  gsap.to('.hero h1 .line:nth-child(2) .line-inner', { xPercent: 8,  scrollTrigger:{ trigger:'.hero', start:'top top', end:'bottom top', scrub: 1 }});
+  gsap.to('.hero h1 .line:nth-child(3) .line-inner', { xPercent: -6, scrollTrigger:{ trigger:'.hero', start:'top top', end:'bottom top', scrub: 1 }});
+
+  /* ---------- Marquee: direction follows scroll ---------- */
+  const track = document.getElementById('marqueeTrack');
+  let mqX = 0, mqDir = 1;
+  ScrollTrigger.create({ onUpdate(self){ mqDir = self.direction; } });
+  gsap.ticker.add((t, dt) => {
+    mqX -= mqDir * dt * 0.045;
+    const w = track.scrollWidth / 2;
+    if(mqX <= -w) mqX += w;
+    if(mqX > 0) mqX -= w;
+    track.style.transform = `translateX(${mqX}px)`;
+  });
+
+  /* ---------- Pinned funnel ---------- */
+  const stages = gsap.utils.toArray('.funnel-stage');
+  const dots = document.querySelectorAll('#funnelProgress i');
+  gsap.set(stages, { autoAlpha: 0, y: 60 });
+  gsap.set(stages[0], { autoAlpha: 1, y: 0 });
+
+  const funnelTl = gsap.timeline({
+    scrollTrigger: { trigger: '#funnelPin', start: 'top top', end: '+=220%', pin: true, scrub: 0.6,
+      onUpdate(self){
+        const idx = Math.min(2, Math.floor(self.progress * 3));
+        dots.forEach((d,i)=>d.classList.toggle('on', i <= idx));
+      }
+    }
+  });
+  funnelTl
+    .to(stages[0], { autoAlpha: 0, y: -60, duration: 1 }, 1)
+    .to(stages[1], { autoAlpha: 1, y: 0, duration: 1 }, 1.5)
+    .to(stages[1], { autoAlpha: 0, y: -60, duration: 1 }, 3)
+    .to(stages[2], { autoAlpha: 1, y: 0, duration: 1 }, 3.5)
+    .to({}, { duration: 0.8 });
+
+  // Oversized numbers scrub-scale
+  gsap.utils.toArray('.funnel-stage .num').forEach(n=>{
+    gsap.fromTo(n, { scale: 1.25 }, { scale: 0.95, scrollTrigger:{ trigger:'#funnelPin', start:'top top', end:'+=220%', scrub: true }});
+  });
+
+  /* ---------- Directional heading drift (site-wide) ---------- */
+  gsap.utils.toArray('.drift').forEach(el=>{
+    const dir = parseFloat(el.dataset.dir || 1);
+    gsap.fromTo(el, { xPercent: dir * 8, opacity: 0.6 }, {
+      xPercent: 0, opacity: 1, ease: 'none',
+      scrollTrigger: { trigger: el, start: 'top 95%', end: 'top 45%', scrub: 1 }
+    });
+  });
+
+  /* ---------- Cards reveal + pointer glow ---------- */
+  gsap.from('.card', {
+    y: 70, opacity: 0, duration: 0.9, ease: 'power3.out', stagger: 0.12,
+    scrollTrigger: { trigger: '.cards', start: 'top 82%', once: true }
+  });
+  document.querySelectorAll('.card').forEach(c=>{
+    c.addEventListener('pointermove', e=>{
+      const r = c.getBoundingClientRect();
+      c.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      c.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    });
+  });
+
+  /* ---------- AR duet pinned sequence ---------- */
+  const counts = document.querySelectorAll('#counts b');
+  const duetTl = gsap.timeline({
+    scrollTrigger: { trigger: '#duetPin', start: 'top top', end: '+=200%', pin: true, scrub: 0.5,
+      onUpdate(self){
+        const p = self.progress;
+        counts.forEach((b,i)=>{
+          b.classList.toggle('hit', p > 0.35 + i * 0.12);
+        });
+      }
+    }
+  });
+  duetTl
+    .from('.duet-copy', { y: 50, opacity: 0, duration: 1 }, 0)
+    .to('#avatarFig', { opacity: 1, duration: 1.2, ease: 'power2.inOut' }, 0.8)
+    .fromTo('#avatarFig', { x: 60, rotate: 4 }, { x: 0, rotate: 0, duration: 1.2, ease: 'power2.out' }, 0.8)
+    .to('.figure.student', { rotate: -3, y: -8, duration: 0.5, yoyo: true, repeat: 3, ease: 'sine.inOut' }, 1.6)
+    .to('#avatarFig',      { rotate: 3,  y: -8, duration: 0.5, yoyo: true, repeat: 3, ease: 'sine.inOut' }, 1.6)
+    .to('#duetCallout', { opacity: 1, x: 0, duration: 0.8 }, 2.6)
+    .to({}, { duration: 0.6 });
+
+  /* ---------- Projection tiles fly in ---------- */
+  gsap.from('.tile', {
+    y: 160, opacity: 0, rotate: i => (i % 2 ? 6 : -6),
+    stagger: { each: 0.08, from: 'edges' },
+    ease: 'power3.out', duration: 1,
+    scrollTrigger: { trigger: '#projection .stage-wrap', start: 'top 78%', once: true }
+  });
+  // gentle idle bob
+  gsap.utils.toArray('.tile').forEach((t,i)=>{
+    gsap.to(t, { y: '-=10', duration: 1.8 + i * 0.2, yoyo: true, repeat: -1, ease: 'sine.inOut', delay: i * 0.15 });
+  });
+
+  /* ---------- Training path ---------- */
+  const steps = gsap.utils.toArray('.step');
+  gsap.to('#trainFill', {
+    scaleY: 1, ease: 'none',
+    scrollTrigger: {
+      trigger: '#trainPath', start: 'top 75%', end: 'bottom 55%', scrub: 0.8,
+      onUpdate(self){
+        steps.forEach((s,i)=> s.classList.toggle('lit', self.progress > (i + 0.4) / steps.length));
+      }
+    }
+  });
+  gsap.from('.step', {
+    x: -34, opacity: 0, stagger: 0.15, duration: 0.8, ease: 'power3.out',
+    scrollTrigger: { trigger: '#trainPath', start: 'top 80%', once: true }
+  });
+
+  /* ---------- TRIBE counter ---------- */
+  const counterEl = document.getElementById('tribeCounter');
+  const counterObj = { v: 0 };
+  gsap.to(counterObj, {
+    v: 150, duration: 1.8, ease: 'power2.out',
+    onUpdate(){ counterEl.textContent = String(Math.round(counterObj.v)).padStart(3,'0'); },
+    scrollTrigger: { trigger: '#tribe', start: 'top 70%', once: true }
+  });
+  gsap.from('#tribe .big, #tribe .body-copy', {
+    y: 40, opacity: 0, duration: 1, stagger: 0.15, ease: 'power3.out',
+    scrollTrigger: { trigger: '#tribe', start: 'top 70%', once: true }
+  });
+
+  /* ---------- Footer ---------- */
+  gsap.from('footer .cta', {
+    y: 60, opacity: 0, duration: 1, ease: 'power3.out',
+    scrollTrigger: { trigger: 'footer', start: 'top 85%', once: true }
+  });
+
+  window.addEventListener('beforeunload', ()=>{ if(vanta) vanta.destroy(); });
+})();
+</script>
+</body>
+</html>

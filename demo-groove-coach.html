@@ -78,6 +78,22 @@
   .act svg{width:21px;height:21px;stroke:var(--cream);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
   .act[data-off] svg{opacity:.3;}
 
+  /* pause/play cross-fade */
+  #pauseAct .bubble{position:relative;}
+  #pauseAct .ico{position:absolute;inset:0;margin:auto;transition:opacity .2s var(--ease), scale .2s var(--ease), filter .2s var(--ease);}
+  #pauseAct .ico.play{opacity:0;scale:.25;filter:blur(4px);fill:var(--cream);stroke:none;}
+  #pauseAct[data-paused] .ico.play{opacity:1;scale:1;filter:blur(0);}
+  #pauseAct[data-paused] .ico.pause{opacity:0;scale:.25;filter:blur(4px);}
+
+  /* record */
+  #recAct .dot{width:18px;height:18px;border-radius:9px;background:var(--ember);
+    transition:border-radius .2s var(--ease), scale .2s var(--ease);}
+  #recAct[data-rec] .dot{border-radius:4px;scale:.78;}
+  #recAct[data-rec] .bubble{box-shadow:0 0 0 1.5px var(--ember), 0 0 22px #ff6b4a59, 0 6px 20px #00000066;}
+  .rec-pill{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;}
+  .rec-pill i{width:7px;height:7px;border-radius:4px;background:#fff;animation:blink 1.2s ease-in-out infinite;}
+  @keyframes blink{50%{opacity:.25;}}
+
   /* streak flame ring when hot */
   #streakAct .bubble.hot{box-shadow:0 0 0 1.5px var(--gold), 0 0 24px #e9bf6a59, 0 6px 20px #00000066;}
 
@@ -160,6 +176,7 @@
   <div id="head">
     <span class="logo">KVM</span>
     <span class="live" id="liveTag" hidden>LIVE</span>
+    <span class="live rec-pill" id="recPill" hidden><i></i>REC <span id="recTime">0:00</span></span>
   </div>
 
   <div id="frameGuide"></div>
@@ -168,6 +185,15 @@
   <div id="judge"></div>
 
   <div id="rail">
+    <button class="act" id="recAct" aria-label="Record session">
+      <span class="bubble"><span class="dot"></span></span><span class="lbl">Rec</span>
+    </button>
+    <button class="act" id="pauseAct" aria-label="Pause or resume">
+      <span class="bubble">
+        <svg class="ico pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+        <svg class="ico play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+      </span><span class="lbl" id="pauseLbl">Pause</span>
+    </button>
     <button class="act" aria-label="On-beat accuracy">
       <span class="bubble gold" id="statAcc">0%</span><span class="lbl">On beat</span>
     </button>
@@ -247,6 +273,61 @@ $("voiceAct").onclick = () => {
 };
 $("voiceOn").onchange = e => $("voiceAct").toggleAttribute("data-off", !e.target.checked);
 
+/* ---------- pause / resume ---------- */
+$("pauseAct").onclick = () => {
+  if(phase === "groove"){
+    phase = "paused";
+    audio.stop();
+    speechSynthesis.cancel();
+    $("pauseAct").setAttribute("data-paused", "");
+    $("pauseLbl").textContent = "Play";
+    $("liveTag").hidden = true;
+    [...pips.children].forEach(p => p.classList.remove("on"));
+    $("coachLine").innerHTML = `<span class="beatnum" id="beatNum">–</span>Paused — take a breath.`;
+  } else if(phase === "paused"){
+    phase = "groove";
+    audio.start();
+    $("pauseAct").removeAttribute("data-paused");
+    $("pauseLbl").textContent = "Pause";
+    $("liveTag").hidden = false;
+    speak("And we're back — five, six, seven, eight!", true);
+  }
+};
+
+/* ---------- record & save session ---------- */
+let recorder = null, recChunks = [], recStart = 0, recTimerId = null;
+$("recAct").onclick = () => {
+  if(!audio) return;                                   // camera flow not started yet
+  if(recorder){ recorder.stop(); return; }
+  const stream = canvas.captureStream(30);
+  audio.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mime = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4" : "video/webm";
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6e6 });
+  recChunks = [];
+  recorder.ondataavailable = e => { if(e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    const ext = mime.includes("mp4") ? "mp4" : "webm";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(recChunks, { type: mime }));
+    a.download = `kvm-groove-${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    recorder = null;
+    clearInterval(recTimerId);
+    $("recPill").hidden = true;
+    $("recAct").removeAttribute("data-rec");
+    speak("Saved. That clip is yours.", true);
+  };
+  recorder.start();
+  recStart = performance.now();
+  $("recAct").setAttribute("data-rec", "");
+  $("recPill").hidden = false;
+  recTimerId = setInterval(() => {
+    const s = Math.floor((performance.now() - recStart) / 1000);
+    $("recTime").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }, 500);
+};
+
 /* ---------- voice ---------- */
 function speak(text, force){
   const bn = $("beatNum")?.textContent ?? "–";
@@ -267,6 +348,7 @@ function speak(text, force){
 function makeAudio(){
   const ac = new (window.AudioContext || window.webkitAudioContext)();
   const master = ac.createGain(); master.gain.value = .55; master.connect(ac.destination);
+  const dest = ac.createMediaStreamDestination(); master.connect(dest); // tap for session recording
   const kick = t => {
     const o = ac.createOscillator(), g = ac.createGain();
     o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(45, t + .12);
@@ -303,7 +385,7 @@ function makeAudio(){
 
   let nextStep = 0, step = 0, timer = null;
   return {
-    ac,
+    ac, dest,
     start(){
       nextStep = ac.currentTime + .4; step = 0; beatTimes = []; beatIndex = 0;
       timer = setInterval(() => {
@@ -417,7 +499,7 @@ function processPose(result, tMs){
 function capsule(x1, y1, x2, y2, w1, w2, light, dark){
   const a = Math.atan2(y2 - y1, x2 - x1), s = Math.sin(a), c = Math.cos(a);
   const g = ctx.createLinearGradient(x1 + s * w1, y1 - c * w1, x1 - s * w1, y1 + c * w1);
-  g.addColorStop(0, light); g.addColorStop(.55, dark); g.addColorStop(1, "#8d8577");
+  g.addColorStop(0, light); g.addColorStop(.55, dark); g.addColorStop(1, "#cfc8ba");
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(x1, y1, w1, a + Math.PI / 2, a - Math.PI / 2);
@@ -434,7 +516,7 @@ function drawFrame(lm){
   ctx.translate(w, 0); ctx.scale(-1, 1);
   ctx.drawImage(video, fit.dx, fit.dy, dw, dh);
   ctx.restore();
-  ctx.fillStyle = "rgba(13,12,17,0.30)"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(13,12,17,0.18)"; ctx.fillRect(0, 0, w, h);
 
   if(!lm || !$("skelOn").checked) return;
   const X = p => fit.dx + (1 - p.x) * fit.dw, Y = p => fit.dy + p.y * fit.dh;
@@ -444,10 +526,11 @@ function drawFrame(lm){
   const since = beatTimes.length ? audio.ac.currentTime - beatTimes[beatTimes.length - 1] : 1;
   const nearBeat = phase === "groove" && (since < .12 || since > spb - .12);
 
-  const LIGHT = "#f6f1e7", MID = "#d9d2c2";
+  const LIGHT = "#ffffff", MID = "#e9e2d4";
   ctx.save();
-  ctx.shadowColor = nearBeat ? GOLD : "#00000099";
-  ctx.shadowBlur = nearBeat ? 26 : 10;
+  ctx.globalAlpha = .34;                        // ghost: you stay visible through the figure
+  ctx.shadowColor = nearBeat ? GOLD : "#f1ece2";
+  ctx.shadowBlur = nearBeat ? 30 : 16;
 
   // ground shadow
   if(vis(31) || vis(32)){
@@ -480,7 +563,7 @@ function drawFrame(lm){
   if(vis(0)){
     const hx = X(lm[0]), hy = Y(lm[0]) - U * 2, r = 5.4 * U;
     const g = ctx.createRadialGradient(hx - r * .35, hy - r * .45, r * .15, hx, hy, r);
-    g.addColorStop(0, "#faf6ee"); g.addColorStop(.7, MID); g.addColorStop(1, "#8d8577");
+    g.addColorStop(0, "#ffffff"); g.addColorStop(.7, MID); g.addColorStop(1, "#cfc8ba");
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hx, hy, r, 0, Math.PI * 2); ctx.fill();
   }
   // joint accents on hands/feet — gold when the beat lands
